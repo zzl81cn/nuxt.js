@@ -4,14 +4,31 @@ import { compile } from '../utils'
 
 <% if (components.ErrorPage) { %>
   <% if (('~@').includes(components.ErrorPage.charAt(0))) { %>
-import NuxtError from '<%= components.ErrorPage %>'
+import NuxtErrorComponent from '<%= components.ErrorPage %>'
   <% } else { %>
-import NuxtError from '<%= "../" + components.ErrorPage %>'
+import NuxtErrorComponent from '<%= "../" + components.ErrorPage %>'
   <% } %>
 <% } else { %>
-import NuxtError from './nuxt-error.vue'
+import NuxtErrorComponent from './nuxt-error.vue'
 <% } %>
 import NuxtChild from './nuxt-child'
+
+const NuxtError = {
+  name: 'NuxtErrorBoundary',
+  data: () => ({
+    error: false
+  }),
+  errorCaptured (err, vm, info) {
+  <% if (isDev) { %>
+    console.error('Error in error page encountered')
+    console.error(err, info)
+  <% } %>
+    this.error = true
+  },
+  render (h) {
+    return this.error ? h('p', {} ,'An error occurred while rendering the error page') : h(NuxtErrorComponent)
+  }
+}
 
 export default {
   name: 'nuxt',
