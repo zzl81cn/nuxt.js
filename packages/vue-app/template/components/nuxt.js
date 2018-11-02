@@ -26,7 +26,11 @@ const NuxtError = {
     this.error = true
   },
   render (h) {
-    return this.error ? h('p', {} ,'An error occurred while rendering the error page') : h(NuxtErrorComponent)
+    const data = {
+      attrs: this.$attrs,
+      listeners: this.$listeners
+    }
+    return this.error ? h('p', data ,'An error occurred while rendering the error page') : h(NuxtErrorComponent, data, this.$slots.default)
   }
 }
 
