@@ -4,35 +4,14 @@ import { compile } from '../utils'
 
 <% if (components.ErrorPage) { %>
   <% if (('~@').includes(components.ErrorPage.charAt(0))) { %>
-import NuxtErrorComponent from '<%= components.ErrorPage %>'
+import NuxtError from '<%= components.ErrorPage %>'
   <% } else { %>
-import NuxtErrorComponent from '<%= "../" + components.ErrorPage %>'
+import NuxtError from '<%= "../" + components.ErrorPage %>'
   <% } %>
 <% } else { %>
-import NuxtErrorComponent from './nuxt-error.vue'
+import NuxtError from './nuxt-error.vue'
 <% } %>
 import NuxtChild from './nuxt-child'
-
-const NuxtError = {
-  name: 'NuxtErrorBoundary',
-  data: () => ({
-    error: false
-  }),
-  errorCaptured (err, vm, info) {
-  <% if (isDev) { %>
-    console.error('Error in error page encountered')
-    console.error(err, info)
-  <% } %>
-    this.error = true
-  },
-  render (h) {
-    const data = {
-      attrs: this.$attrs,
-      listeners: this.$listeners
-    }
-    return this.error ? h('p', data ,'An error occurred while rendering the error page') : h(NuxtErrorComponent, data, this.$slots.default)
-  }
-}
 
 export default {
   name: 'nuxt',
@@ -40,15 +19,26 @@ export default {
     nuxtChildKey: String,
     keepAlive: Boolean
   },
+  data(){
+    return {
+      error: false,
+    }
+  },
   render(h) {
     // If there is some error
     if (this.nuxt.err) {
+      if(this.error){
+        return h('p', 'An error occurred while rendering the error page')
+      }
+      this.error = this.nuxt.err
       return h('nuxt-error', {
         props: {
           error: this.nuxt.err
         }
       })
     }
+    this.error = false
+
     // Directly return nuxt child
     return h('nuxt-child', {
       key: this.routerViewKey,
