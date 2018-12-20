@@ -1,4 +1,4 @@
-import { consola, mockGetNuxt, mockGetBuilder, mockGetGenerator, NuxtCommand } from '../utils'
+import { mockGetNuxt, mockGetBuilder, mockGetGenerator, NuxtCommand } from '../utils'
 
 describe('build', () => {
   let build
@@ -8,7 +8,6 @@ describe('build', () => {
     jest.spyOn(process, 'exit').mockImplementation(code => code)
   })
 
-  afterAll(() => process.exit.mockRestore())
   afterEach(() => jest.resetAllMocks())
 
   test('has run function', () => {
@@ -41,15 +40,36 @@ describe('build', () => {
     await NuxtCommand.from(build).run()
 
     expect(generate).toHaveBeenCalled()
-    expect(process.exit).toHaveBeenCalled()
   })
 
-  test('catches error', async () => {
-    mockGetNuxt({ mode: 'universal' })
-    mockGetBuilder(Promise.reject(new Error('Builder Error')))
+  test('build with devtools', async () => {
+    mockGetNuxt({
+      mode: 'universal'
+    })
+    const builder = mockGetBuilder(Promise.resolve())
 
-    await NuxtCommand.from(build).run()
+    const cmd = NuxtCommand.from(build, ['build', '.', '--devtools'])
 
-    expect(consola.fatal).toHaveBeenCalledWith(new Error('Builder Error'))
+    const options = await cmd.getNuxtConfig(cmd.argv)
+
+    await cmd.run()
+
+    expect(options.vue.config.devtools).toBe(true)
+    expect(builder).toHaveBeenCalled()
+  })
+
+  test('build with modern mode', async () => {
+    mockGetNuxt({
+      mode: 'universal'
+    })
+    mockGetBuilder(Promise.resolve())
+
+    const cmd = NuxtCommand.from(build, ['build', '.', '--m'])
+
+    const options = await cmd.getNuxtConfig()
+
+    await cmd.run()
+
+    expect(options.modern).toBe(true)
   })
 })

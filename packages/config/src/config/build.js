@@ -5,9 +5,9 @@ export default () => ({
   analyze: false,
   profile: process.argv.includes('--profile'),
   extractCSS: false,
+  crossorigin: undefined,
   cssSourceMap: undefined,
   ssr: undefined,
-  modern: undefined,
   parallel: false,
   cache: false,
   publicPath: '/_nuxt/',
@@ -43,11 +43,16 @@ export default () => ({
     },
     scss: {},
     stylus: {},
+    ts: {
+      transpileOnly: true,
+      appendTsSuffixTo: [/\.vue$/]
+    },
     vueStyle: {}
   },
   styleResources: {},
   plugins: [],
   terser: {},
+  hardSource: false,
   optimizeCSS: undefined,
   optimization: {
     runtimeChunk: 'single',
@@ -98,16 +103,11 @@ export default () => ({
   hotMiddleware: {},
 
   stats: {
-    chunks: false,
-    children: false,
-    modules: false,
-    colors: true,
-    warnings: true,
-    errors: true,
     excludeAssets: [
       /.map$/,
       /index\..+\.html$/,
       /vue-ssr-(client|modern)-manifest.json/
     ]
-  }
+  },
+  friendlyErrors: true
 })

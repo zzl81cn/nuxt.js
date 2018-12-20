@@ -1,6 +1,6 @@
 import { normalize } from 'path'
 import consola from 'consola'
-import { loadFixture, getPort, Nuxt, rp } from '../utils'
+import { loadFixture, getPort, Nuxt, Builder, rp } from '../utils'
 
 let port
 const url = route => 'http://localhost:' + port + route
@@ -21,14 +21,14 @@ describe('module', () => {
       normalize('fixtures/module/.nuxt/basic.reverse.')
     )).toBe(true)
     const { html } = await nuxt.server.renderRoute('/')
-    expect(html.includes('<h1>TXUN</h1>')).toBe(true)
+    expect(html).toContain('<h1>TXUN</h1>')
   })
 
   test('Layout', async () => {
-    expect(nuxt.options.layouts.layout.includes('layout')).toBe(true)
+    expect(nuxt.options.layouts.layout).toContain('layout')
 
     const { html } = await nuxt.server.renderRoute('/layout')
-    expect(html.includes('<h1>Module Layouts</h1>')).toBe(true)
+    expect(html).toContain('<h1>Module Layouts</h1>')
   })
 
   test('/404 should display the module error layout', async () => {
@@ -67,6 +67,12 @@ describe('module', () => {
   test('AddVendor - deprecated', () => {
     nuxt.moduleContainer.addVendor('nuxt-test')
     expect(consola.warn).toHaveBeenCalledWith('addVendor has been deprecated due to webpack4 optimization')
+  })
+
+  test('Lodash - deprecated', async () => {
+    const builder = new Builder(nuxt)
+    await builder.generateRoutesAndFiles()
+    expect(consola.warn).toHaveBeenCalledWith('Avoid using _ inside templates')
   })
 
   // Close server and ask nuxt to stop listening to file changes

@@ -1,7 +1,11 @@
 import { resolve } from 'path'
 import consola from 'consola'
+import Glob from 'glob'
+import pify from 'pify'
 
 import { Nuxt, getNuxtConfig, version } from '../utils'
+
+const glob = pify(Glob)
 
 describe('basic config defaults', () => {
   test('Nuxt.version is same as package', () => {
@@ -11,7 +15,12 @@ describe('basic config defaults', () => {
   test('modulesDir uses /node_modules as default if not set', () => {
     const options = getNuxtConfig({})
     const currentNodeModulesDir = resolve(__dirname, '..', '..', 'node_modules')
-    expect(options.modulesDir.includes(currentNodeModulesDir)).toBe(true)
+    expect(options.modulesDir).toContain(currentNodeModulesDir)
+  })
+
+  test('client source map not generated', async () => {
+    const mapFiles = await glob(resolve(__dirname, '..', 'fixtures/basic/.nuxt/dist/client/*.js.map'))
+    expect(mapFiles.length).toEqual(0)
   })
 
   test('vendor has been deprecated', () => {
@@ -36,5 +45,29 @@ describe('basic config defaults', () => {
 
     options = getNuxtConfig({ globalName: 'foo?' })
     expect(options.globalName).toEqual('nuxt')
+  })
+
+  test('@nuxtjs/babel-preset-app has been deprecated', () => {
+    let options = getNuxtConfig({
+      build: {
+        babel: {
+          presets: ['@nuxtjs/babel-preset-app']
+        }
+      }
+    })
+    expect(options.build.babel.presets).toEqual(['@nuxt/babel-preset-app'])
+    expect(consola.warn).toHaveBeenCalledWith('@nuxtjs/babel-preset-app has been deprecated, please use @nuxt/babel-preset-app.')
+
+    consola.warn.mockClear()
+
+    options = getNuxtConfig({
+      build: {
+        babel: {
+          presets: [['@nuxtjs/babel-preset-app']]
+        }
+      }
+    })
+    expect(options.build.babel.presets).toEqual([['@nuxt/babel-preset-app']])
+    expect(consola.warn).toHaveBeenCalledWith('@nuxtjs/babel-preset-app has been deprecated, please use @nuxt/babel-preset-app.')
   })
 })

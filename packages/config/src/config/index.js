@@ -8,6 +8,7 @@ import modes from './modes'
 import render from './render'
 import router from './router'
 import server from './server'
+import cli from './cli'
 
 export function getDefaultNuxtConfig(options = {}) {
   if (!options.env) {
@@ -15,13 +16,14 @@ export function getDefaultNuxtConfig(options = {}) {
   }
 
   return {
-    ..._app(options),
-    ..._common(options),
-    build: build(options),
-    messages: messages(options),
-    modes: modes(options),
-    render: render(options),
-    router: router(options),
-    server: server(options)
+    ..._app(),
+    ..._common(),
+    build: build(),
+    messages: messages(),
+    modes: modes(),
+    render: render(),
+    router: router(),
+    server: server(options),
+    cli: cli()
   }
 }

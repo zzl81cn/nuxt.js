@@ -1,11 +1,8 @@
-import https from 'https'
 import path from 'path'
-import enableDestroy from 'server-destroy'
+import consola from 'consola'
 import launchMiddleware from 'launch-editor-middleware'
 import serveStatic from 'serve-static'
-import chalk from 'chalk'
-import ip from 'ip'
-import consola from 'consola'
+import servePlaceholder from 'serve-placeholder'
 import connect from 'connect'
 import { determineGlobals, isUrl } from '@nuxt/common'
 
@@ -13,6 +10,8 @@ import ServerContext from './context'
 import renderAndGetWindow from './jsdom'
 import nuxtMiddleware from './middleware/nuxt'
 import errorMiddleware from './middleware/error'
+import Listener from './listener'
+import createModernMiddleware from './middleware/modern'
 
 export default class Server {
   constructor(nuxt) {
@@ -29,11 +28,17 @@ export default class Server {
     this.resources = {}
 
     // Will be available on dev
-    this.webpackDevMiddleware = null
-    this.webpackHotMiddleware = null
+    this.devMiddleware = null
+    this.hotMiddleware = null
+
+    // Will be set after listen
+    this.listeners = []
 
     // Create new connect instance
     this.app = connect()
+
+    // Close hook
+    this.nuxt.hook('close', () => this.close())
   }
 
   async ready() {
@@ -64,20 +69,26 @@ export default class Server {
         // If only setting for `compression` are provided, require the module and insert
         const compression = this.nuxt.resolver.requireModule('compression')
         this.useMiddleware(compression(compressor))
-      } else {
-        // Else, require own compression middleware
+      } else if (compressor) {
+        // Else, require own compression middleware if compressor is actually truthy
         this.useMiddleware(compressor)
       }
     }
 
+    const modernMiddleware = createModernMiddleware({
+      context: this.renderer.context
+    })
+
     // Add webpack middleware support only for development
     if (this.options.dev) {
+      this.useMiddleware(modernMiddleware)
       this.useMiddleware(async (req, res, next) => {
-        if (this.webpackDevMiddleware) {
-          await this.webpackDevMiddleware(req, res)
+        const name = req.modernMode ? 'modern' : 'client'
+        if (this.devMiddleware && this.devMiddleware[name]) {
+          await this.devMiddleware[name](req, res)
         }
-        if (this.webpackHotMiddleware) {
-          await this.webpackHotMiddleware(req, res)
+        if (this.hotMiddleware && this.hotMiddleware[name]) {
+          await this.hotMiddleware[name](req, res)
         }
         next()
       })
@@ -110,12 +121,32 @@ export default class Server {
           this.options.render.dist
         )
       })
+      this.useMiddleware(modernMiddleware)
     }
 
-    // Add User provided middleware
+    // Add user provided middleware
     this.options.serverMiddleware.forEach((m) => {
       this.useMiddleware(m)
     })
+
+    const { fallback } = this.options.render
+    if (fallback) {
+      // Graceful 404 errors for dist files
+      if (fallback.dist) {
+        this.useMiddleware({
+          path: this.publicPath,
+          handler: servePlaceholder(fallback.dist)
+        })
+      }
+
+      // Graceful 404 errors for other paths
+      if (fallback.static) {
+        this.useMiddleware({
+          path: '/',
+          handler: servePlaceholder(fallback.static)
+        })
+      }
+    }
 
     // Finally use nuxtMiddleware
     this.useMiddleware(nuxtMiddleware({
@@ -140,16 +171,20 @@ export default class Server {
   }
 
   useMiddleware(middleware) {
-    // Resolve middleware
-    if (typeof middleware === 'string') {
-      middleware = this.nuxt.resolver.requireModule(middleware)
-    }
+    let handler = middleware.handler || middleware
 
-    // Resolve handler
-    if (typeof middleware.handler === 'string') {
-      middleware.handler = this.nuxt.resolver.requireModule(middleware.handler)
+    // Resolve handler setup as string (path)
+    if (typeof handler === 'string') {
+      try {
+        handler = this.nuxt.resolver.requireModule(middleware.handler || middleware)
+      } catch (err) {
+        if (!this.options.dev) {
+          throw err[0]
+        }
+        // Only warn missing file in development
+        consola.warn(err[0])
+      }
     }
-    const handler = middleware.handler || middleware
 
     // Resolve path
     const path = (
@@ -177,96 +212,46 @@ export default class Server {
     })
   }
 
-  showReady(clear = true) {
-    if (this.readyMessage) {
-      consola.success(this.readyMessage)
-    }
+  async listen(port, host, socket) {
+    // Create a new listener
+    const listener = new Listener({
+      port: port || this.options.server.port,
+      host: host || this.options.server.host,
+      socket: socket || this.options.server.socket,
+      https: this.options.server.https,
+      app: this.app,
+      dev: this.options.dev
+    })
+
+    // Listen
+    await listener.listen()
+
+    // Push listener to this.listeners
+    this.listeners.push(listener)
+
+    await this.nuxt.callHook('listen', listener.server, listener)
   }
 
-  listen(port, host, socket) {
-    return new Promise((resolve, reject) => {
-      if (!socket && typeof this.options.server.socket === 'string') {
-        socket = this.options.server.socket
-      }
+  async close() {
+    if (this.__closed) {
+      return
+    }
+    this.__closed = true
 
-      const args = { exclusive: false }
+    for (const listener of this.listeners) {
+      await listener.close()
+    }
+    this.listeners = []
 
-      if (socket) {
-        args.path = socket
-      } else {
-        args.port = port || this.options.server.port
-        args.host = host || this.options.server.host
-      }
+    if (typeof this.renderer.close === 'function') {
+      await this.renderer.close()
+    }
 
-      let appServer
-      const isHttps = Boolean(this.options.server.https)
+    this.app.removeAllListeners()
+    this.app = null
 
-      if (isHttps) {
-        let httpsOptions
-
-        if (this.options.server.https === true) {
-          httpsOptions = {}
-        } else {
-          httpsOptions = this.options.server.https
-        }
-
-        appServer = https.createServer(httpsOptions, this.app)
-      } else {
-        appServer = this.app
-      }
-
-      const server = appServer.listen(
-        args,
-        (err) => {
-          /* istanbul ignore if */
-          if (err) {
-            return reject(err)
-          }
-
-          let listenURL
-
-          if (!socket) {
-            ({ address: host, port } = server.address())
-            if (host === '127.0.0.1') {
-              host = 'localhost'
-            } else if (host === '0.0.0.0') {
-              host = ip.address()
-            }
-
-            listenURL = chalk.underline.blue(`http${isHttps ? 's' : ''}://${host}:${port}`)
-            this.readyMessage = `Listening on ${listenURL}`
-          } else {
-            listenURL = chalk.underline.blue(`unix+http://${socket}`)
-            this.readyMessage = `Listening on ${listenURL}`
-          }
-
-          // Close server on nuxt close
-          this.nuxt.hook(
-            'close',
-            () =>
-              new Promise((resolve, reject) => {
-                // Destroy server by forcing every connection to be closed
-                server.listening && server.destroy((err) => {
-                  consola.debug('server closed')
-                  /* istanbul ignore if */
-                  if (err) {
-                    return reject(err)
-                  }
-                  resolve()
-                })
-              })
-          )
-
-          if (socket) {
-            this.nuxt.callHook('listen', server, { path: socket }).then(resolve)
-          } else {
-            this.nuxt.callHook('listen', server, { port, host }).then(resolve)
-          }
-        }
-      )
-
-      // Add server.destroy(cb) method
-      enableDestroy(server)
-    })
+    for (const key in this.resources) {
+      delete this.resources[key]
+    }
   }
 }

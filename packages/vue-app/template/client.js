@@ -31,16 +31,11 @@ const NUXT = window.<%= globals.context %> || {}
 
 Object.assign(Vue.config, <%= serialize(vue.config) %>)<%= isTest ? '// eslint-disable-line' : '' %>
 
-<% if (debug || mode === 'spa') { %>
+<% if (debug) { %>
 // Setup global Vue error handler
 if (!Vue.config.$nuxt) {
   const defaultErrorHandler = Vue.config.errorHandler
   Vue.config.errorHandler = (err, vm, info, ...rest) => {
-    const nuxtError = {
-      statusCode: err.statusCode || err.name || 'Whoops!',
-      message: err.message || err.toString()
-    }
-
     // Call other handler if exist
     let handled = null
     if (typeof defaultErrorHandler === 'function') {
@@ -53,10 +48,10 @@ if (!Vue.config.$nuxt) {
     if (vm && vm.$root) {
       const nuxtApp = Object.keys(Vue.config.$nuxt)
         .find(nuxtInstance => vm.$root[nuxtInstance])
-    
+
       // Show Nuxt Error Page
       if (nuxtApp && vm.$root[nuxtApp].error && info !== 'render function') {
-        vm.$root[nuxtApp].error(nuxtError)
+        vm.$root[nuxtApp].error(err)
       }
     }
 
@@ -68,20 +63,21 @@ if (!Vue.config.$nuxt) {
     if (process.env.NODE_ENV !== 'production') {
       console.error(err)
     } else {
-      console.error(err.message || nuxtError.message)
+      console.error(err.message || err)
     }
   }
   Vue.config.$nuxt = {}
 }
 Vue.config.$nuxt.<%= globals.nuxt %> = true
-
 <% } %>
+const errorHandler = Vue.config.errorHandler || console.error
 
 // Create and mount App
 createApp()
   .then(mountApp)
   .catch((err) => {
-    console.error('[nuxt] Error while initializing app', err)
+    err.message = '[nuxt] Error while mounting app: ' + err.message
+    errorHandler(err)
   })
 
 function componentOption(component, key, ...args) {
@@ -150,10 +146,19 @@ async function loadAsyncComponents(to, from, next) {
     // Call next()
     next()
   } catch (err) {
-    const error = err || {}
-    const statusCode = (error.statusCode || error.status || (error.response && error.response.status) || 500)
-    this.error({ statusCode, message: error.message })
-    this.<%= globals.nuxt %>.$emit('routeChanged', to, from, error)
+    err = err || {}
+    const statusCode = err.statusCode || err.status || (err.response && err.response.status) || 500
+    const message = err.message || ''
+
+    // Handle chunk loading errors
+    // This may be due to a new deployment or a network problem
+    if (/^Loading chunk (\d)+ failed\./.test(message)) {
+      window.location.reload(true /* skip cache */)
+      return // prevent error page blinking for user
+    }
+
+    this.error({ statusCode, message })
+    this.$nuxt.$emit('routeChanged', to, from, err)
     next(false)
   }
 }
@@ -414,8 +419,6 @@ async function render(to, from, next) {
       return this.<%= globals.nuxt %>.$emit('routeChanged', to, from, error)
     }
     _lastPaths = []
-    const errorResponseStatus = (error.response && error.response.status)
-    error.statusCode = error.statusCode || error.status || errorResponseStatus || 500
 
     globalHandleError(error)
 
@@ -683,7 +686,7 @@ async function mountApp(__app) {
     // Push the path and then mount app
     router.push(path, () => mount(), (err) => {
       if (!err) return mount()
-      console.error(err)
+      errorHandler(err)
     })
   })
 }

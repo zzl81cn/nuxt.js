@@ -24,7 +24,7 @@ describe('error', () => {
 
   test('/404 should display an error too', async () => {
     const { error } = await nuxt.server.renderRoute('/404')
-    expect(error.message.includes('This page could not be found')).toBe(true)
+    expect(error.message).toContain('This page could not be found')
   })
 
   test('/ with renderAndGetWindow()', async () => {
@@ -39,7 +39,7 @@ describe('error', () => {
   })
 
   test('Error: callHook()', async () => {
-    consola.error.mockClear()
+    consola.fatal.mockClear()
 
     const errorHook = jest.fn()
     const error = new Error('test hook error')
@@ -50,8 +50,8 @@ describe('error', () => {
 
     expect(errorHook).toHaveBeenCalledTimes(1)
     expect(errorHook).toHaveBeenCalledWith(error)
-    expect(consola.error).toHaveBeenCalledTimes(1)
-    expect(consola.error).toHaveBeenCalledWith(error)
+    expect(consola.fatal).toHaveBeenCalledTimes(1)
+    expect(consola.fatal).toHaveBeenCalledWith(error)
   })
 
   // Close server and ask nuxt to stop listening to file changes

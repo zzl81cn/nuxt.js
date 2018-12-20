@@ -34,8 +34,8 @@ export default class Hookable {
     try {
       await sequence(this._hooks[name], fn => fn(...args))
     } catch (err) {
-      consola.error(err)
-      this.callHook('error', err)
+      name !== 'error' && this.callHook('error', err)
+      consola.fatal(err)
     }
   }
 
@@ -43,6 +43,10 @@ export default class Hookable {
     if (name) {
       delete this._hooks[name]
     }
+  }
+
+  clearHooks() {
+    this._hooks = {}
   }
 
   flatHooks(configHooks, hooks = {}, parentName) {

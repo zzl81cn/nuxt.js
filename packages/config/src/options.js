@@ -4,13 +4,20 @@ import defaultsDeep from 'lodash/defaultsDeep'
 import defaults from 'lodash/defaults'
 import pick from 'lodash/pick'
 import isObject from 'lodash/isObject'
+import uniq from 'lodash/uniq'
 import consola from 'consola'
-import { isPureObject, isUrl, guardDir, isNonEmptyString } from '@nuxt/common'
+import { guardDir, isNonEmptyString, isPureObject, isUrl } from '@nuxt/common'
 import { getDefaultNuxtConfig } from './config'
 
 export function getNuxtConfig(_options) {
+  // Prevent duplicate calls
+  if (_options.__normalized__) {
+    return _options
+  }
+
   // Clone options to prevent unwanted side-effects
   const options = Object.assign({}, _options)
+  options.__normalized__ = true
 
   // Normalize options
   if (options.loading === true) {
@@ -53,10 +60,17 @@ export function getNuxtConfig(_options) {
 
   // Apply defaults
   const nuxtConfig = getDefaultNuxtConfig()
+
   nuxtConfig.build._publicPath = nuxtConfig.build.publicPath
+
+  // Fall back to default if publicPath is falsy
+  if (options.build && !options.build.publicPath) {
+    options.build.publicPath = undefined
+  }
+
   defaultsDeep(options, nuxtConfig)
 
-  // Check srcDir and generate.dir excistence
+  // Check srcDir and generate.dir existence
   const hasSrcDir = isNonEmptyString(options.srcDir)
   const hasGenerateDir = isNonEmptyString(options.generate.dir)
 
@@ -67,6 +81,14 @@ export function getNuxtConfig(_options) {
 
   // Resolve buildDir
   options.buildDir = path.resolve(options.rootDir, options.buildDir)
+
+  // Default value for _nuxtConfigFile
+  if (!options._nuxtConfigFile) {
+    options._nuxtConfigFile = path.resolve(options.rootDir, 'nuxt.config.js')
+  }
+
+  // Watch for _nuxtConfigFile changes
+  options.watch.push(options._nuxtConfigFile)
 
   // Protect rootDir against buildDir
   guardDir(options, 'rootDir', 'buildDir')
@@ -90,12 +112,13 @@ export function getNuxtConfig(_options) {
   }
 
   // Populate modulesDir
-  options.modulesDir = []
-    .concat(options.modulesDir)
-    .concat(path.join(options.nuxtDir, 'node_modules')).filter(isNonEmptyString)
-    .map(dir => path.resolve(options.rootDir, dir))
+  options.modulesDir = uniq(
+    require.main.paths.concat(
+      [].concat(options.modulesDir).map(dir => path.resolve(options.rootDir, dir))
+    )
+  )
 
-  const mandatoryExtensions = ['js', 'mjs']
+  const mandatoryExtensions = ['js', 'mjs', 'ts']
 
   options.extensions = mandatoryExtensions
     .filter(ext => !options.extensions.includes(ext))
@@ -110,6 +133,9 @@ export function getNuxtConfig(_options) {
   } else {
     options.appTemplatePath = path.resolve(options.srcDir, options.appTemplatePath)
   }
+
+  options.build.publicPath = options.build.publicPath.replace(/([^/])$/, '$1/')
+  options.build._publicPath = options.build._publicPath.replace(/([^/])$/, '$1/')
 
   // Ignore publicPath on dev
   /* istanbul ignore if */
@@ -170,9 +196,32 @@ export function getNuxtConfig(_options) {
     options.build.cssSourceMap = options.dev
   }
 
+  const babelConfig = options.build.babel
   // babel cacheDirectory
-  if (options.build.babel.cacheDirectory === undefined) {
-    options.build.babel.cacheDirectory = options.dev
+  if (babelConfig.cacheDirectory === undefined) {
+    babelConfig.cacheDirectory = options.dev
+  }
+
+  // TODO: remove this warn in Nuxt 3
+  if (Array.isArray(babelConfig.presets)) {
+    const warnPreset = (presetName) => {
+      const oldPreset = '@nuxtjs/babel-preset-app'
+      const newPreset = '@nuxt/babel-preset-app'
+      if (presetName.includes(oldPreset)) {
+        presetName = presetName.replace(oldPreset, newPreset)
+        consola.warn('@nuxtjs/babel-preset-app has been deprecated, please use @nuxt/babel-preset-app.')
+      }
+      return presetName
+    }
+    babelConfig.presets = babelConfig.presets.map((preset) => {
+      const hasOptions = Array.isArray(preset)
+      if (hasOptions) {
+        preset[0] = warnPreset(preset[0])
+      } else if (typeof preset === 'string') {
+        preset = warnPreset(preset)
+      }
+      return preset
+    })
   }
 
   // vue config
@@ -214,7 +263,11 @@ export function getNuxtConfig(_options) {
 
   // Apply mode preset
   const modePreset = options.modes[options.mode || 'universal']
-  defaultsDeep(options, modePreset)
+
+  if (!modePreset) {
+    consola.warn(`Unknown mode: ${options.mode}. Falling back to universal`)
+  }
+  defaultsDeep(options, modePreset || options.modes.universal)
 
   // If no server-side rendering, add appear true transition
   /* istanbul ignore if */
@@ -240,11 +293,6 @@ export function getNuxtConfig(_options) {
   // build.extractCSS.allChunks has no effect
   if (typeof options.build.extractCSS.allChunks !== 'undefined') {
     consola.warn('build.extractCSS.allChunks has no effect from v2.0.0. Please use build.optimization.splitChunks settings instead.')
-  }
-
-  // TODO: remove when mini-css-extract-plugin supports HMR
-  if (options.dev) {
-    options.build.extractCSS = false
   }
 
   // Enable minimize for production builds
@@ -273,12 +321,16 @@ export function getNuxtConfig(_options) {
     }
   }
 
-  // include SFCs in node_modules
   options.build.transpile = [].concat(options.build.transpile || [])
-    .map(module => module instanceof RegExp ? module : new RegExp(module))
 
   if (options.build.quiet === true) {
     consola.level = 0
+  }
+
+  // Use runInNewContext for dev mode by default
+  const { bundleRenderer } = options.render
+  if (typeof bundleRenderer.runInNewContext === 'undefined') {
+    bundleRenderer.runInNewContext = options.dev
   }
 
   return options

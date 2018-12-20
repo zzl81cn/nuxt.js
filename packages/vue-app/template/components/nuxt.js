@@ -14,7 +14,7 @@ import NuxtError from './nuxt-error.vue'
 import NuxtChild from './nuxt-child'
 
 export default {
-  name: 'nuxt',
+  name: 'Nuxt',
   props: {
     nuxtChildKey: String,
     keepAlive: Boolean
@@ -40,7 +40,7 @@ export default {
     this.error = false
 
     // Directly return nuxt child
-    return h('nuxt-child', {
+    return h('NuxtChild', {
       key: this.routerViewKey,
       props: this.$props
     })

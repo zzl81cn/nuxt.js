@@ -2,6 +2,7 @@ import path from 'path'
 import escapeRegExp from 'lodash/escapeRegExp'
 import get from 'lodash/get'
 import consola from 'consola'
+import serialize from 'serialize-javascript'
 
 export const encodeHtml = function encodeHtml(str) {
   return str.replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -256,12 +257,72 @@ function cleanChildrenRoutes(routes, isChild = false) {
   return routes
 }
 
+const DYNAMIC_ROUTE_REGEX = /^\/([:*])/
+
+const sortRoutes = function sortRoutes(routes) {
+  routes.sort((a, b) => {
+    if (!a.path.length) {
+      return -1
+    }
+    if (!b.path.length) {
+      return 1
+    }
+    // Order: /static, /index, /:dynamic
+    // Match exact route before index: /login before /index/_slug
+    if (a.path === '/') {
+      return DYNAMIC_ROUTE_REGEX.test(b.path) ? -1 : 1
+    }
+    if (b.path === '/') {
+      return DYNAMIC_ROUTE_REGEX.test(a.path) ? 1 : -1
+    }
+
+    let i
+    let res = 0
+    let y = 0
+    let z = 0
+    const _a = a.path.split('/')
+    const _b = b.path.split('/')
+    for (i = 0; i < _a.length; i++) {
+      if (res !== 0) {
+        break
+      }
+      y = _a[i] === '*' ? 2 : _a[i].includes(':') ? 1 : 0
+      z = _b[i] === '*' ? 2 : _b[i].includes(':') ? 1 : 0
+      res = y - z
+      // If a.length >= b.length
+      if (i === _b.length - 1 && res === 0) {
+        // unless * found sort by level, then alphabetically
+        res = _a[i] === '*' ? -1 : (
+          _a.length === _b.length ? a.path.localeCompare(b.path) : (_a.length - _b.length)
+        )
+      }
+    }
+
+    if (res === 0) {
+      // unless * found sort by level, then alphabetically
+      res = _a[i - 1] === '*' && _b[i] ? 1 : (
+        _a.length === _b.length ? a.path.localeCompare(b.path) : (_a.length - _b.length)
+      )
+    }
+    return res
+  })
+
+  routes.forEach((route) => {
+    if (route.children) {
+      sortRoutes(route.children)
+    }
+  })
+
+  return routes
+}
+
 export const createRoutes = function createRoutes(files, srcDir, pagesDir) {
+  const supportedExtensions = ['vue', 'js', 'ts']
   const routes = []
   files.forEach((file) => {
     const keys = file
-      .replace(RegExp(`^${pagesDir}`), '')
-      .replace(/\.(vue|js)$/, '')
+      .replace(new RegExp(`^${pagesDir}`), '')
+      .replace(new RegExp(`\\.(${supportedExtensions.join('|')})$`), '')
       .replace(/\/{2,}/g, '/')
       .split('/')
       .slice(1)
@@ -275,7 +336,7 @@ export const createRoutes = function createRoutes(files, srcDir, pagesDir) {
         ? route.name + '-' + sanitizedKey
         : sanitizedKey
       route.name += key === '_' ? 'all' : ''
-      route.chunkName = file.replace(/\.(vue|js)$/, '')
+      route.chunkName = file.replace(new RegExp(`\\.(${supportedExtensions.join('|')})$`), '')
       const child = parent.find(parentRoute => parentRoute.name === route.name)
 
       if (child) {
@@ -292,46 +353,10 @@ export const createRoutes = function createRoutes(files, srcDir, pagesDir) {
         }
       }
     })
-    // Order Routes path
     parent.push(route)
-    parent.sort((a, b) => {
-      if (!a.path.length) {
-        return -1
-      }
-      if (!b.path.length) {
-        return 1
-      }
-      // Order: /static, /index, /:dynamic
-      // Match exact route before index: /login before /index/_slug
-      if (a.path === '/') {
-        return DYNAMIC_ROUTE_REGEX.test(b.path) ? -1 : 1
-      }
-      if (b.path === '/') {
-        return DYNAMIC_ROUTE_REGEX.test(a.path) ? 1 : -1
-      }
-
-      let i
-      let res = 0
-      let y = 0
-      let z = 0
-      const _a = a.path.split('/')
-      const _b = b.path.split('/')
-      for (i = 0; i < _a.length; i++) {
-        if (res !== 0) {
-          break
-        }
-        y = _a[i] === '*' ? 2 : _a[i].includes(':') ? 1 : 0
-        z = _b[i] === '*' ? 2 : _b[i].includes(':') ? 1 : 0
-        res = y - z
-        // If a.length >= b.length
-        if (i === _b.length - 1 && res === 0) {
-          // change order if * found
-          res = _a[i] === '*' ? -1 : 1
-        }
-      }
-      return res === 0 ? (_a[i - 1] === '*' && _b[i] ? 1 : -1) : res
-    })
   })
+
+  sortRoutes(routes)
   return cleanChildrenRoutes(routes)
 }
 
@@ -380,8 +405,6 @@ const getRoutePathExtension = (key) => {
 
   return key
 }
-
-const DYNAMIC_ROUTE_REGEX = /^\/(:|\*)/
 
 /**
  * Wraps value in array if it is not already an array
@@ -436,3 +459,23 @@ export function defineAlias(src, target, prop, opts = {}) {
     }
   })
 }
+
+export function serializeFunction(func) {
+  let open = false
+  return serialize(func)
+    .replace(serializeFunction.assignmentRE, (_, spaces) => {
+      return `${spaces}:function(`
+    })
+    .replace(serializeFunction.internalFunctionRE, (_, spaces, name, args) => {
+      if (open) {
+        return `${spaces}${name}:function(${args}) {`
+      } else {
+        open = true
+        return _
+      }
+    })
+    .replace(`${func.name}(`, 'function(')
+}
+
+serializeFunction.internalFunctionRE = /^(\s*)(?!(?:if)|(?:for)|(?:while)|(?:switch))(\w+)\s*\((.*?)\)\s*\{/gm
+serializeFunction.assignmentRE = /^(\s*):(\w+)\(/gm

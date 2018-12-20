@@ -4,13 +4,7 @@ const noopData = () => ({})
 
 // window.{{globals.loadedCallback}} hook
 // Useful for jsdom testing or plugins (https://github.com/tmpvar/jsdom#dealing-with-asynchronous-script-loading)
-if (process.client || process.browser) {
-  <% if (isDev) { %>
-  if (process.browser) {
-    console.warn('process.browser is deprecated, use process.client instead.')
-  }
-  <% } %>
-
+if (process.client) {
   window.<%= globals.readyCallback %>Cbs = []
   window.<%= globals.readyCallback %> = (cb) => {
     window.<%= globals.readyCallback %>Cbs.push(cb)
@@ -117,8 +111,8 @@ export async function getRouteData(route) {
   // Send back a copy of route with meta based on Component definition
   return {
     ...route,
-    meta: getMatchedComponents(route).map((Component) => {
-      return Component.options.meta || {}
+    meta: getMatchedComponents(route).map((Component, index) => {
+      return { ...Component.options.meta, ...(route.matched[index] || {}).meta }
     })
   }
 }
@@ -171,13 +165,7 @@ export async function setContext(app, context) {
             status: status
           })
         }
-        if (process.client || process.browser) {
-          <% if (isDev) { %>
-          if (process.browser) {
-            console.warn('process.browser is deprecated, use process.client instead.')
-          }
-          <% } %>
-
+        if (process.client) {
           // https://developer.mozilla.org/en-US/docs/Web/API/Location/replace
           window.location.replace(path)
 
@@ -189,12 +177,7 @@ export async function setContext(app, context) {
     if (process.server) {
       app.context.beforeNuxtRender = fn => context.beforeRenderFns.push(fn)
     }
-    if (process.client || process.browser) {
-      <% if (isDev) { %>
-      if (process.browser) {
-        console.warn('process.browser is deprecated, use process.client instead.')
-      }
-      <% } %>
+    if (process.client) {
       app.context.nuxtState = window.<%= globals.context %>
     }
   }
@@ -226,6 +209,11 @@ export function middlewareSeries(promises, appContext) {
 export function promisify(fn, context) {
   let promise
   if (fn.length === 2) {
+    <% if (isDev) { %>
+      console.warn('Callback-based asyncData, fetch or middleware calls are deprecated. ' +
+        'Please switch to promises or async/await syntax')
+    <% } %>
+
     // fn(context, callback)
     promise = new Promise((resolve) => {
       fn(context, function (err, data) {
@@ -254,7 +242,7 @@ export function getLocation(base, mode) {
   if (base && path.indexOf(base) === 0) {
     path = path.slice(base.length)
   }
-  return (path || '/') + window.location.search + window.location.hash
+  return decodeURI(path || '/') + window.location.search + window.location.hash
 }
 
 export function urlJoin() {
@@ -283,6 +271,24 @@ export function getQueryDiff(toQuery, fromQuery) {
     }
   }
   return diff
+}
+
+export function normalizeError(err) {
+  let message
+  if (!(err.message || typeof err === 'string')) {
+    try {
+      message = JSON.stringify(err, null, 2)
+    } catch (e) {
+      message = `[${err.constructor.name}]`
+    }
+  } else {
+    message = err.message || err
+  }
+  return {
+    ...err,
+    message: message,
+    statusCode: (err.statusCode || err.status || (err.response && err.response.status) || 500)
+  }
 }
 
 /**
@@ -429,7 +435,7 @@ function tokensToFunction(tokens) {
         continue
       }
 
-      const value = data[token.name]
+      const value = data[token.name || 'pathMatch']
       let segment
 
       if (value == null) {
@@ -560,3 +566,4 @@ function formatQuery(query) {
     return key + '=' + val
   }).filter(Boolean).join('&')
 }
+

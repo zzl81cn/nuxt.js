@@ -1,57 +1,42 @@
-import consola from 'consola'
+import fs from 'fs'
+import execa from 'execa'
 import NuxtCommand from './command'
-import * as commands from './commands'
 import setup from './setup'
-import { indent, foldLines, startSpaces, optionSpaces } from './formatting'
+import getCommand from './commands'
 
-async function listCommands(_commands) {
-  _commands = await Promise.all(
-    Object.keys(_commands).map(cmd => NuxtCommand.load(cmd))
-  )
-  let maxLength = 0
-  const commandsHelp = []
-  for (const name in _commands) {
-    commandsHelp.push([_commands[name].usage, _commands[name].description])
-    maxLength = Math.max(maxLength, _commands[name].usage.length)
+export default async function run(_argv) {
+  // Read from process.argv
+  const argv = _argv ? Array.from(_argv) : process.argv.slice(2)
+
+  // Check for internal command
+  let cmd = await getCommand(argv[0])
+
+  // Matching `nuxt` or `nuxt [dir]` or `nuxt -*` for `nuxt dev` shortcut
+  if (!cmd && (!argv[0] || argv[0][0] === '-' || fs.existsSync(argv[0]))) {
+    argv.unshift('dev')
+    cmd = await getCommand('dev')
   }
 
-  const _cmmds = commandsHelp.map(([cmd, description]) => {
-    const i = indent(maxLength + optionSpaces - cmd.length)
-    return foldLines(
-      cmd + i + description,
-      startSpaces + maxLength + optionSpaces * 2,
-      startSpaces + optionSpaces
-    )
-  }).join('\n')
+  // Setup env
+  setup({ dev: argv[0] === 'dev' })
 
-  const usage = foldLines(`Usage: nuxt <command> [--help|-h]`, startSpaces)
-  const cmmds = foldLines(`Commands:`, startSpaces) + '\n\n' + _cmmds
-  process.stdout.write(`${usage}\n\n${cmmds}\n\n`)
-}
-
-export default function run() {
-  const defaultCommand = 'dev'
-  let cmd = process.argv[2]
-
-  const _commands = { ...commands }
-  if (_commands[cmd]) {
-    process.argv.splice(2, 1)
-  } else {
-    if (process.argv.includes('--help') || process.argv.includes('-h')) {
-      listCommands(_commands).then(() => process.exit(0))
-      return
-    }
-    cmd = defaultCommand
+  // Try internal command
+  if (cmd) {
+    return NuxtCommand.run(cmd, argv.slice(1))
   }
 
-  // Setup runtime
-  setup({
-    dev: cmd === 'dev'
-  })
-
-  return NuxtCommand.load(cmd)
-    .then(command => command.run())
-    .catch((error) => {
-      consola.fatal(error)
+  // Try external command
+  try {
+    await execa(`nuxt-${argv[0]}`, argv.slice(1), {
+      stdout: process.stdout,
+      stderr: process.stderr,
+      stdin: process.stdin
     })
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw String(`Command not found: nuxt-${argv[0]}`)
+    } else {
+      throw String(`Failed to run command \`nuxt-${argv[0]}\`:\n${error}`)
+    }
+  }
 }
